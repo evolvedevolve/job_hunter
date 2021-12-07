@@ -11,20 +11,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import re
+import json
 
-class Browser_Super:
-    '''' a somewhat java esque constructor
-    containing the browser access and waiter functions
-    '''
-    def __init__(self, a_browser, a_waiter):
-        self.browser = a_browser
-        self.waiter = a_waiter
-        return self
-
-def launch_browser(url):
+def launch_browser(test_info_dict):
     chromedriver_service = Service('./chromedriver.exe')
     new_browser = wd.Chrome(service=chromedriver_service)
-    new_browser.get(url)
+    new_browser.get(test_info_dict.get('events_url'))
     return new_browser
 
 def wait_for_browser_ready(browser, condition):
@@ -34,18 +26,30 @@ def wait_for_browser_ready(browser, condition):
     ready = waiter.until(EC.element_to_be_clickable((By.ID, condition)))
     return ready
 
-def login(browser, username, password):
+def get_test_info(path, file_name):
+    with open(path + './' + file_name, 'r') as t_f:
+     json_string = t_f.read()
+    
+    #print(data_dict['user_name'])
+    test_info_dictionary = json.loads(json_string)
+    print(str(test_info_dictionary.keys()))
+    '''
+    test_info_dictionary.get("user_name")
+    test_info_dictionary.get("user_password")
+    test_info_dictionary.get("required_session_file")
+    '''
+    return test_info_dictionary
+
+def login(browser, test_info_dictionary):
     ''' '''    
     wait_for_browser_ready(browser, 'btnLogin')
-    # <input type="text" id="txtUserName" name="UserName" maxlength="50">
+    
     user_name_field = browser.find_element(By.ID, "txtUserName")
-    user_name_field.send_keys(username)
+    user_name_field.send_keys(test_info_dictionary.get('user_name'))
     
-    # <input type="password" id="txtPassword" name="Password" maxlength="50">
     user_password_field = browser.find_element(By.ID, "txtPassword")
-    user_password_field.send_keys("")
+    user_password_field.send_keys(test_info_dictionary.get('user_password'))
     
-    # <input name="btnLogin" type="submit" id="btnLogin" class="green" value="Login">
     login_button = browser.find_element(By.ID, "btnLogin")
     login_button.click()
     
@@ -56,18 +60,23 @@ def list_events(browser):
     upcoming_events_link.click()
     
     # wait for rptUpcomingEvents_ctl00_divItemRow to all be ready
-    upcoming_events_page_ready = waiter.until(EC.element_to_be_clickable((By.ID, 'rptUpcomingEvents_ctl00_btnRSVP')))
+    wait_for_browser_ready(browser, 'rptUpcomingEvents_ctl00_btnRSVP')
     
     page_soup = BeautifulSoup(browser.page_source, 'html.parser')
     evnt_title_links = page_soup.find_all("a", {"id" : re.compile('rptUpcomingEvents_ctl.*_hlkTitleUpcoming')})
-    #print(event_title_links)
+    print(evnt_title_links.text)
     
     return evnt_title_links
 
-def get_related_events(browser, evnt_title_links):
+def get_related_events(browser, evnt_title_links, test_info_dictionary):
+    tmp_base_path = test_info_dictionary.get('base_path')
+    tmp_file_name = test_info_dictionary.get('required_session_file')
+    req_session_file_path = tmp_base_path + './' + tmp_file_name
     # slap all required sessions into one string for easy compare
-    required_sessions_file = open(r"H:\2021-11-03-HIGHER-LANDING\schedule.txt", "r")
+    required_sessions_file = open(req_session_file_path, "r")
     required_sessions_string = required_sessions_file.read()
+    
+    events_to_attend_list = []
     
     ''' still need to do the date compare as well '''
      
@@ -79,20 +88,20 @@ def get_related_events(browser, evnt_title_links):
             print(link.text)
             click_me = browser.find_element(By.ID, link['id'])
             click_me.click()
-            rsvp_page_ready = waiter.until(EC.element_to_be_clickable((By.ID, 'btnRSVP')))
+            wait_for_browser_ready(browser, 'btnRSVP')
             
-            tmp_event_soup = BeautifulSoup(browser.page_source, 'html.parser')        
-            zoom_link = tmp_event_soup.find('p', text=re.compile('^https:.*zoom'))        
+            # parse all html into a tree structure
+            tmp_event_soup = BeautifulSoup(browser.page_source, 'html.parser')  
+            
+            # pinpoint the zoom link and get a parent object 
+            zoom_link = tmp_event_soup.find('p', text=re.compile('^https:.*zoom'))              
             # get the parent/containing element
             description_container_element = zoom_link.parent        
             
+            # grab the date time from the 
             event_start_datetime = description_container_element.find(id='lblDatetime')
             #print(event_start_datetime.text.replace('/','-'))
-            event_start_datetime_formatted = event_start_datetime.text.replace('/','-')
-                    
-            # find the start point that we are interested in
-            text_start_point = description_container_element.find(id='lblDescription')        
-            text_end_point = description_container_element.find(text=re.compile(".*Passcode:"))        
+            event_start_datetime_formatted = event_start_datetime.text.replace('/','-')             
             
             actual_description_text = description_container_element.get_text(
                 ).split("Send calendar to email")[1].strip('\n')
@@ -112,31 +121,23 @@ def get_related_events(browser, evnt_title_links):
 def return_to_upcoming_events(browser):
     back_to_calendar_link = browser.find_element(By.ID, "hlkBackToCalendar")
     back_to_calendar_link.click()
-    tmp_calendar_ready = waiter.until(EC.element_to_be_clickable((By.ID, 'lnkUpcomingEvents')))
+    wait_for_browser_ready(browser, 'lnkUpcomingEvents')
     tmp_upcoming_events_link = browser.find_element(By.ID, 'lnkUpcomingEvents')
     tmp_upcoming_events_link.click()
-    tmp_upcoming_events_page_ready = waiter.until(EC.element_to_be_clickable((By.ID, 'rptUpcomingEvents_ctl00_btnRSVP')))
+    wait_for_browser_ready(browser, 'rptUpcomingEvents_ctl00_btnRSVP')
 
 def main():
-    # url of where we are going   
-    events_url = "https://suite.insala.com/ICM/Calendar/EventadminV5.aspx"
+    
+    local_base_path = r"H:\2021-11-03-HIGHER-LANDING"
+    test_info_dict = get_test_info(local_base_path, 'test_info.json')
     
     # this will take us to the log in page
-    browser = launch_browser(events_url)
-    # we can use this waiter to halt execution
-    waiter = WebDriverWait(browser, 10)
-    
-    user_name = "patrick.crosman@gmail.com"
-    pass_word = "" # switch this to a simple load from a file
-    
-    # a java esque creation of a super browser
-    brower_super = Browser_Super(browser, waiter)
+    browser = launch_browser(test_info_dict)
 
     # log in using credentials
-    login(browser, user_name, pass_word)
+    login(browser, test_info_dict)
     event_title_links = list_events(browser)    
-    get_related_events(browser, event_title_links)
-    
+    #get_related_events(browser, event_title_links, test_info_dict)    
     
     for event_title_link in event_title_links:
         event_details = get_event_details()
@@ -147,14 +148,21 @@ def main():
 
 if __name__ == '__main__':
     main()
-    
+
+# url of where we are going   
+#events_url = "https://suite.insala.com/ICM/Calendar/EventadminV5.aspx"
 # wait until the page is loaded
 #waiter = WebDriverWait(browser, 10)
 #ready_for_input = waiter.until(EC.element_to_be_clickable((By.ID, 'btnLogin')))
+    
 
+    
+# <input name="btnLogin" type="submit" id="btnLogin" class="green" value="Login">
+#user_name = "patrick.crosman@gmail.com"
+#pass_word = "h1gherLanding!" # switch this to a simple load from a file
  
 #waiter.until(EC.element_to_be_clickable((By.ID, 'lnkUpcomingEvents')))
-waiter.until(EC.element_to_be_clickable((By.ID, 'lnkUpcomingEvents')))
+#waiter.until(EC.element_to_be_clickable((By.ID, 'lnkUpcomingEvents')))
 # wait until events is loaded
 #<div class="divTable" id="common-container" data-abobora="" style="width:100%">
 #calendar_ready = waiter.until(EC.element_to_be_clickable((By.ID, 'lnkUpcomingEvents')))
@@ -169,12 +177,17 @@ waiter.until(EC.element_to_be_clickable((By.ID, 'lnkUpcomingEvents')))
 #page_soup = BeautifulSoup(browser.page_source, 'html.parser')
 #event_title_links = page_soup.find_all("a", {"id" : re.compile('rptUpcomingEvents_ctl.*_hlkTitleUpcoming')})
 #print(event_title_links)
-
+       
+# find the start point that we are interested in
+#text_start_point = description_container_element.find(id='lblDescription')        
+#text_end_point = description_container_element.find(text=re.compile(".*Passcode:"))       
+            
 # slap all required sessions into one string for easy compare
 required_sessions_file = open(r"H:\2021-11-03-HIGHER-LANDING\schedule.txt", "r")
 required_sessions_string = required_sessions_file.read()
  
 # check which ones are the right dates for my enrollment
+'''
 for link in event_title_links:
     if(link.text in required_sessions_string):
         #print(link['id'])
@@ -210,7 +223,7 @@ for link in event_title_links:
         tmp_upcoming_events_page_ready = waiter.until(EC.element_to_be_clickable((By.ID, 'rptUpcomingEvents_ctl00_btnRSVP')))
     else:
         print("skipped")
-
+'''
 '''
 these are in class="row pdb20"
 <span id="lblTitle">Knowing Your Brand Part I</span>
